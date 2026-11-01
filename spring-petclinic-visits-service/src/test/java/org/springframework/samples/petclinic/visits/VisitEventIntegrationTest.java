@@ -9,6 +9,7 @@ import org.apache.kafka.clients.consumer.Consumer;
 import org.apache.kafka.clients.consumer.ConsumerConfig;
 import org.apache.kafka.clients.consumer.ConsumerRecord;
 import org.apache.kafka.clients.consumer.KafkaConsumer;
+import org.apache.kafka.common.TopicPartition;
 import org.apache.kafka.common.serialization.StringDeserializer;
 import org.junit.jupiter.api.Test;
 import org.springframework.beans.factory.annotation.Autowired;
@@ -45,11 +46,7 @@ class VisitEventIntegrationTest {
 
     @Test
     void bookingAVisitPublishesExactlyOneEventKeyedByPetId() throws Exception {
-        try (Consumer<String, String> consumer = consumer("booking-test")) {
-            consumer.subscribe(List.of("visit-events"));
-            // join the group and start from the end, so events of other tests do not count
-            consumer.poll(Duration.ofSeconds(2));
-
+        try (Consumer<String, String> consumer = consumerAtEndOfTopic()) {
             mvc.perform(post("/owners/6/pets/7/visits")
                     .contentType(MediaType.APPLICATION_JSON)
                     .content("{\"date\":\"2026-10-15\",\"description\":\"Annual check-up\",\"visitType\":\"EMERGENCY\"}"))
@@ -60,7 +57,7 @@ class VisitEventIntegrationTest {
                 .andExpect(jsonPath("$.visitType").value("EMERGENCY"))
                 .andExpect(jsonPath("$.description").value("Annual check-up"));
 
-            List<ConsumerRecord<String, String>> records = pollFor(consumer, Duration.ofSeconds(20));
+            List<ConsumerRecord<String, String>> records = pollFor(consumer, "Annual check-up", Duration.ofSeconds(20));
 
             assertThat(records).hasSize(1);
             ConsumerRecord<String, String> record = records.get(0);
@@ -77,11 +74,8 @@ class VisitEventIntegrationTest {
 
     @Test
     void cancellingAVisitKeepsTheRowAndPublishesACancelEvent() throws Exception {
-        try (Consumer<String, String> consumer = consumer("cancel-test")) {
-            consumer.subscribe(List.of("visit-events"));
+        try (Consumer<String, String> consumer = consumerAtEndOfTopic()) {
             // visit 1 of pet 7 comes from data.sql; only this test uses it
-            consumer.poll(Duration.ofSeconds(2));
-
             mvc.perform(put("/owners/6/pets/7/visits/1/cancel"))
                 .andExpect(status().isOk())
                 .andExpect(jsonPath("$.status").value("CANCELLED"));
@@ -115,23 +109,47 @@ class VisitEventIntegrationTest {
             .andExpect(jsonPath("$.status").value("SCHEDULED"));
     }
 
-    /** Waits for the first record, then keeps listening briefly so that a duplicate would be seen. */
-    private static List<ConsumerRecord<String, String>> pollFor(Consumer<String, String> consumer, Duration timeout) {
+    /**
+     * Waits for the first record containing the text, then keeps listening briefly so that a duplicate
+     * would be seen. Events are sent asynchronously, so one from an earlier test can still arrive here;
+     * only records with this test's text count.
+     */
+    private static List<ConsumerRecord<String, String>> pollFor(Consumer<String, String> consumer, String text,
+                                                                Duration timeout) {
         List<ConsumerRecord<String, String>> records = new ArrayList<>();
         long deadline = System.nanoTime() + timeout.toNanos();
         while (records.isEmpty() && System.nanoTime() < deadline) {
-            consumer.poll(Duration.ofMillis(500)).forEach(records::add);
+            collect(consumer, text, Duration.ofMillis(500), records);
         }
-        consumer.poll(Duration.ofSeconds(2)).forEach(records::add);
+        collect(consumer, text, Duration.ofSeconds(2), records);
         return records;
     }
 
-    private Consumer<String, String> consumer(String group) {
-        return new KafkaConsumer<>(Map.of(
+    private static void collect(Consumer<String, String> consumer, String text, Duration wait,
+                                List<ConsumerRecord<String, String>> records) {
+        consumer.poll(wait).forEach(record -> {
+            if (record.value().contains(text)) {
+                records.add(record);
+            }
+        });
+    }
+
+    /**
+     * Positioned before it returns, so it sees every event sent afterwards and none from other
+     * tests. Joining a consumer group instead can take longer than any fixed wait on a busy machine.
+     */
+    private Consumer<String, String> consumerAtEndOfTopic() {
+        Consumer<String, String> consumer = new KafkaConsumer<>(Map.of(
             ConsumerConfig.BOOTSTRAP_SERVERS_CONFIG, kafka.getBrokersAsString(),
-            ConsumerConfig.GROUP_ID_CONFIG, group,
-            ConsumerConfig.AUTO_OFFSET_RESET_CONFIG, "latest",
             ConsumerConfig.KEY_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class,
             ConsumerConfig.VALUE_DESERIALIZER_CLASS_CONFIG, StringDeserializer.class));
+        List<TopicPartition> partitions = consumer.partitionsFor("visit-events").stream()
+            .map(info -> new TopicPartition(info.topic(), info.partition()))
+            .toList();
+        consumer.assign(partitions);
+        consumer.seekToEnd(partitions);
+        // seekToEnd is lazy; asking for the position makes it happen now
+        partitions.forEach(consumer::position);
+        return consumer;
     }
 }
