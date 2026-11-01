@@ -29,6 +29,9 @@ petclinic:
     dead-letter-topic: visit-events.DLT
     retries: 3
     retry-interval: 1s
+    # About five minutes, on top of the connection timeout of each attempt
+    database-retries: 60
+    database-retry-interval: 5s
   alerts:
     # Override without a code change, for example PETCLINIC_ALERTS_URGENT_TYPES=EMERGENCY,URGENT_CARE,SURGERY
     urgent-types: EMERGENCY,URGENT_CARE

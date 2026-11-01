@@ -37,12 +37,7 @@ public class VisitService {
         visit.setPetId(petId);
         log.info("Saving visit {}", visit);
         Visit saved = visitRepository.save(visit);
-        if (saved.getDate() == null) {
-            // the contract requires a visit date, so there is no valid event to send
-            log.warn("Visit {} has no date; no event published", saved.getId());
-        } else {
-            events.publishEvent(VisitEvent.scheduled(saved, ownerId, Instant.now()));
-        }
+        events.publishEvent(VisitEvent.scheduled(saved, ownerId, Instant.now()));
         return saved;
     }
 
@@ -64,6 +59,7 @@ public class VisitService {
         log.info("Cancelling visit {}", visitId);
         Visit saved = visitRepository.save(visit);
         if (saved.getDate() == null) {
+            // an older row: new visits must have a date, and the contract requires one
             log.warn("Visit {} has no date; no event published", saved.getId());
         } else {
             events.publishEvent(VisitEvent.cancelled(saved, ownerId, Instant.now()));

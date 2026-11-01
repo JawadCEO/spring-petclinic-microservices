@@ -5,6 +5,7 @@ import java.util.ArrayList;
 import java.util.List;
 
 import jakarta.persistence.criteria.Predicate;
+import org.springframework.data.domain.PageRequest;
 import org.springframework.data.domain.Sort;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.format.annotation.DateTimeFormat;
@@ -15,6 +16,8 @@ import org.springframework.web.bind.annotation.RestController;
 @RestController
 class AuditResource {
 
+    private static final int MAX_LIMIT = 500;
+
     private final AuditRecordRepository auditRecords;
 
     AuditResource(AuditRecordRepository auditRecords) {
@@ -22,7 +25,8 @@ class AuditResource {
     }
 
     /**
-     * Searches audit records, newest first. Every filter is optional.
+     * Searches audit records, newest first. Every filter is optional. At most {@code limit}
+     * records are returned, and never more than 500.
      *
      * @param type visit type, for example EMERGENCY
      * @param from first visit date to include
@@ -34,7 +38,8 @@ class AuditResource {
         @RequestParam(required = false) Integer ownerId,
         @RequestParam(required = false) String type,
         @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate from,
-        @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to) {
+        @RequestParam(required = false) @DateTimeFormat(iso = DateTimeFormat.ISO.DATE) LocalDate to,
+        @RequestParam(defaultValue = "100") int limit) {
 
         Specification<AuditRecord> filters = (record, query, builder) -> {
             List<Predicate> predicates = new ArrayList<>();
@@ -55,6 +60,8 @@ class AuditResource {
             }
             return builder.and(predicates.toArray(new Predicate[0]));
         };
-        return auditRecords.findAll(filters, Sort.by(Sort.Direction.DESC, "occurredAt"));
+        int size = Math.max(1, Math.min(limit, MAX_LIMIT));
+        return auditRecords.findAll(filters, PageRequest.of(0, size, Sort.by(Sort.Direction.DESC, "occurredAt")))
+            .getContent();
     }
 }

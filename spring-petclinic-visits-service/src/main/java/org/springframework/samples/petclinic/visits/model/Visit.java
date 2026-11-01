@@ -20,6 +20,7 @@ import java.time.LocalDate;
 import com.fasterxml.jackson.annotation.JsonFormat;
 import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.persistence.*;
+import jakarta.validation.constraints.NotNull;
 import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
@@ -43,7 +44,8 @@ public class Visit {
 
     @Column(name = "visit_date")
     @JsonFormat(pattern = "yyyy-MM-dd")
-    private LocalDate date = LocalDate.now();
+    @NotNull
+    private LocalDate date;
 
     @Size(max = 8192)
     @Column(name = "description")

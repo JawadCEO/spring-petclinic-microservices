@@ -124,12 +124,11 @@ class VisitServiceTest {
     }
 
     @Test
-    void savesButAnnouncesNothingWhenTheVisitHasNoDate() {
-        Visit visit = Visit.VisitBuilder.aVisit().description("no date").build();
+    void cancellingAnOlderVisitWithoutADateAnnouncesNothing() {
+        Visit visit = Visit.VisitBuilder.aVisit().id(42).petId(7).build();
+        given(visitRepository.findById(42)).willReturn(Optional.of(visit));
 
-        Visit saved = visitService.schedule(6, 7, visit);
-
-        assertThat(saved.getId()).isEqualTo(42);
+        assertThat(visitService.cancel(6, 7, 42).getStatus()).isEqualTo(VisitStatus.CANCELLED);
         verify(events, never()).publishEvent(any());
     }
 }

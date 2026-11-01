@@ -25,6 +25,10 @@ public class VisitEventListener {
      */
     @KafkaListener(topics = "${petclinic.events.visit-topic}", groupId = "${spring.kafka.consumer.group-id}")
     public void onVisitEvent(String message) {
-        alertService.handle(JSON.readValue(message, VisitEvent.class)).ifPresent(pushService::push);
+        alertService.handle(parse(message)).ifPresent(pushService::push);
+    }
+
+    static VisitEvent parse(String message) {
+        return JSON.readValue(message, VisitEvent.class);
     }
 }

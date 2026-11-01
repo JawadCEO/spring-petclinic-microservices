@@ -27,6 +27,8 @@ one did not fit the sprint.
 | 10 | Book with type EMERGENCY | Owner page shows the type and status SCHEDULED |
 | 11 | Check `/api/alert/audit?petId=<pet>` | One new record, severity EMERGENCY |
 | 12 | Click Cancel on that visit | Status CANCELLED, the button disappears, the row stays |
+| 12a | Cancel a visit in another tab, then click Cancel on the old page | Status changes to CANCELLED, no error |
+| 12b | Stop visits-service, click Cancel | A red "Could not cancel this visit" message beside the button |
 | 13 | Check the audit search again | One more record, VISIT_CANCELLED |
 
 ## Results

@@ -1,9 +1,9 @@
 package org.springframework.samples.petclinic.alerts.audit;
 
-import java.util.List;
 import java.util.UUID;
 
-import org.springframework.data.domain.Sort;
+import org.springframework.data.domain.Page;
+import org.springframework.data.domain.Pageable;
 import org.springframework.data.jpa.domain.Specification;
 import org.springframework.data.repository.Repository;
 
@@ -16,7 +16,7 @@ public interface AuditRecordRepository extends Repository<AuditRecord, Long> {
 
     boolean existsByEventId(UUID eventId);
 
-    List<AuditRecord> findAll(Specification<AuditRecord> specification, Sort sort);
+    Page<AuditRecord> findAll(Specification<AuditRecord> specification, Pageable pageable);
 
     long count();
 }

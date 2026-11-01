@@ -76,6 +76,26 @@ class VisitResourceTest {
     }
 
     @Test
+    void shouldRejectANullDate() throws Exception {
+        mvc.perform(post("/owners/6/pets/7/visits")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"date\":null,\"description\":\"x\"}"))
+            .andExpect(status().isBadRequest());
+
+        verifyNoInteractions(visitService);
+    }
+
+    @Test
+    void shouldRejectAMissingDate() throws Exception {
+        mvc.perform(post("/owners/6/pets/7/visits")
+                .contentType(MediaType.APPLICATION_JSON)
+                .content("{\"description\":\"x\"}"))
+            .andExpect(status().isBadRequest());
+
+        verifyNoInteractions(visitService);
+    }
+
+    @Test
     void shouldRejectALowerCaseVisitType() throws Exception {
         mvc.perform(post("/owners/6/pets/7/visits")
                 .contentType(MediaType.APPLICATION_JSON)

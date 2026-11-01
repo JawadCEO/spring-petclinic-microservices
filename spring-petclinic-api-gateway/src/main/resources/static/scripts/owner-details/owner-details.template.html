@@ -59,6 +59,7 @@
                     <td>
                         <button class="btn btn-default btn-xs" type="button" ng-if="visit.status !== 'CANCELLED'"
                                 ng-click="$ctrl.cancelVisit(pet, visit)">Cancel</button>
+                        <span class="text-danger" ng-if="visit.cancelError">{{visit.cancelError}}</span>
                     </td>
                     <td>{{visit.description}}</td>
                 </tr>

@@ -88,8 +88,16 @@ with the volume `alerts-db`. `scripts/phase2-smoke-test.sh`.
 - **The owner id of a cancel event comes from the URL**, as for booking. It is not stored in
   `visits`, and not checked against the customers service, so a wrong owner id in the URL
   would be recorded as sent. This answers the spike's open question for now.
-- **Retries cover every failure.** A database outage also sends events to the DLT after 3 retries,
-  and nothing replays them yet.
+- **Two retry policies.** A bad event gets 3 retries, 1 second apart, then goes to the DLT. A
+  database failure retries for about five minutes, holding the partition, so a short outage moves
+  nothing to the DLT. Checked by stopping PostgreSQL on the real stack: the booking returned 201,
+  the DLT did not grow, and the record was stored once after PostgreSQL came back.
+- **No POST retry on the visits route.** The retry filter moved from the gateway's default filters
+  to the routes that had it and can use it, so a booking cannot be stored twice by the gateway.
+- **A date is required.** A missing or null date returns 400, so every new visit produces an event.
+- **Audit search returns at most 100 records by default**, or `limit`, up to 500, newest first.
+- **`VISIT_CANCELLED` keeps the severity of the visit.** The severity says how urgent the visit
+  was. W10 should use `eventType` so that a cancellation is not shown as an emergency.
 - **Audit table created by the service itself.** The shared config server overrides
   `spring.sql.init.*` and `server.port` for every service. The first run on the real stack showed
   this: the table did not exist. The test profile now sends the same shared settings.
@@ -100,19 +108,52 @@ All on Jawad's laptop (Windows 11, JDK 17, Docker Desktop), 2026-11-01.
 
 | Test | Result |
 |---|---|
-| visits-service unit and integration tests | 22/22 |
-| notification-alert-service tests, with real Kafka and PostgreSQL containers | 13/13 |
-| api-gateway tests | 4/4 |
+| visits-service unit and integration tests | 24/24 |
+| notification-alert-service tests, with real Kafka and PostgreSQL containers | 26/26 |
+| api-gateway tests | 6/6 |
 | `scripts/phase2-smoke-test.sh` | Phase 1 18/18 and Phase 2 9/9 |
 | `scripts/regression-backend.sh` | 15/15 |
 | UI checklist | 13/13 steps |
+
+## Review of pull request #4
+
+Sneha's review on 2026-11-01: 18/18, 9/9 and 15/15 on her laptop, and the UI worked.
+
+| # | Comment | Resolution |
+|---|---|---|
+| 1 | Booking with no date gives no alert | Fixed: 400, and the date is required in the form |
+| 2 | Cancel gives no feedback on failure | Fixed. The shared error handler also crashed on any error without a field list, which hid the status from every caller; fixed too |
+| 3 | Database outage moves good events to the DLT | Fixed: about five minutes of retries for database failures |
+| 4 | Wrong owner id recorded as fact | Accepted limit, see below |
+| 5 | Gateway retry on booking | Fixed: no POST retry on the visits route |
+| 6 | Cancelled emergency shows as EMERGENCY | Decision above; for the team to confirm in W10 |
+| 7 | Audit search has no limit | Fixed: `limit`, default 100, maximum 500 |
+| 8 | Queued events lost on restart | Documented below |
+| 9 | Open WebSocket origin, published database port | Documented in SETUP.md |
+| 10 | Visit types fixed in the form | Documented below |
+| 11 | CI does not build the images | Fixed: new CI job builds the images, starts the stack and runs the smoke and regression tests |
+| 12 | Memory | Documented in SETUP.md with the measured use |
+| 13 | `Thread.sleep` in the push test | Fixed: sends probe events until the subscription is live |
+| 14 | `VisitEvent` duplicated | Fixed: the consumer now reads the shared contract examples in a test |
+| 15 | `json-schema-validator` version | Fixed: managed in the parent `pom.xml` |
+| 16 | Test data stays in `alerts-db` | Documented in SETUP.md |
 
 ## Known limits
 
 - **A failed send loses the event.** There is no retry or outbox on the producer side.
 - **Nothing replays the dead-letter topic.** Events there stay until someone handles them.
-- **The gateway retries a failed POST once.** That could store a visit twice, with two events and
-  two audit rows. Still open; W12 is the natural place.
+- **The owner id is not checked.** It comes from the URL for booking and cancelling, so a wrong id
+  reaches the audit record. Checking it would make every booking depend on customers-service being
+  up, which goes against the goal that a booking never waits on another service. Accepted for now;
+  the UI always sends the right id.
+- **Queued events are lost on restart.** Up to 1,000 events wait in memory while Kafka is down, and
+  a restart of visits-service loses them.
+- **Visit ids repeat after a restart.** visits-service uses in-memory HSQLDB, which resets, while
+  audit records stay in PostgreSQL. Records from before and after a restart can share a `visitId`
+  for different visits, and older ones point at visits that no longer exist. Use
+  `docker compose down -v` to start clean before a demo.
+- **The form's visit types are fixed.** The dropdown lists three types, so a new urgent type needs
+  a small code change as well as the configuration. To revisit with the UI work in Phase 3.
 - **The MySQL schema** only gets the new columns on a new database (`CREATE TABLE IF NOT EXISTS`).
   An existing MySQL database needs them added by hand. MySQL was not run.
 - **No login**, so `/ws` and the audit search are open. Login is out of scope in the plan.
@@ -123,5 +164,4 @@ All on Jawad's laptop (Windows 11, JDK 17, Docker Desktop), 2026-11-01.
 
 | Question | Needed by | Owner |
 |---|---|---|
-| Remove the gateway's POST retry for the visits route, or make booking idempotent? | W12 | Jawad |
 | What should happen to events in the dead-letter topic? | W14 | Team |

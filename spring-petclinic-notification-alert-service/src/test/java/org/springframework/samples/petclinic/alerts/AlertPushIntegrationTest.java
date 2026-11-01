@@ -1,6 +1,7 @@
 package org.springframework.samples.petclinic.alerts;
 
 import java.lang.reflect.Type;
+import java.time.Duration;
 import java.util.Map;
 import java.util.UUID;
 import java.util.concurrent.BlockingQueue;
@@ -27,6 +28,7 @@ import org.testcontainers.kafka.KafkaContainer;
 import org.testcontainers.postgresql.PostgreSQLContainer;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.awaitility.Awaitility.await;
 
 /**
  * A STOMP client subscribes the way a browser will, an event goes into Kafka, the alert comes out.
@@ -69,15 +71,18 @@ class AlertPushIntegrationTest {
                 alerts.add((Map<String, Object>) payload);
             }
         });
-        // the subscription has no acknowledgement to wait for
-        Thread.sleep(500);
+        // A subscription has no acknowledgement, so send probe events until one comes back
+        await().atMost(Duration.ofSeconds(60)).until(() -> {
+            kafkaTemplate.send("visit-events", "7", event(UUID.randomUUID()));
+            return alerts.poll(1, TimeUnit.SECONDS) != null;
+        });
+        while (alerts.poll(2, TimeUnit.SECONDS) != null) {
+            // alerts of the remaining probes
+        }
 
         UUID eventId = UUID.randomUUID();
-        String event = "{\"eventId\":\"" + eventId + "\",\"eventType\":\"VISIT_SCHEDULED\",\"visitId\":9,\"petId\":7,"
-            + "\"ownerId\":6,\"visitDate\":\"2026-11-01\",\"visitType\":\"EMERGENCY\",\"description\":\"bleeding\","
-            + "\"occurredAt\":\"2026-10-31T10:00:00Z\"}";
-        kafkaTemplate.send("visit-events", "7", event);
-        kafkaTemplate.send("visit-events", "7", event);
+        kafkaTemplate.send("visit-events", "7", event(eventId));
+        kafkaTemplate.send("visit-events", "7", event(eventId));
 
         Map<String, Object> alert = alerts.poll(60, TimeUnit.SECONDS);
 
@@ -94,5 +99,11 @@ class AlertPushIntegrationTest {
 
         session.disconnect();
         client.stop();
+    }
+
+    private static String event(UUID eventId) {
+        return "{\"eventId\":\"" + eventId + "\",\"eventType\":\"VISIT_SCHEDULED\",\"visitId\":9,\"petId\":7,"
+            + "\"ownerId\":6,\"visitDate\":\"2026-11-01\",\"visitType\":\"EMERGENCY\",\"description\":\"bleeding\","
+            + "\"occurredAt\":\"2026-10-31T10:00:00Z\"}";
     }
 }

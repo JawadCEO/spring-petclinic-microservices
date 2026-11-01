@@ -109,6 +109,18 @@ class AlertPipelineIntegrationTest {
     }
 
     @Test
+    void searchReturnsTheNewestRecordsUpToTheLimit() throws Exception {
+        kafkaTemplate.send(TOPIC, "105", event(UUID.randomUUID(), 105, 205, "ROUTINE", "2026-12-01"));
+        kafkaTemplate.send(TOPIC, "105", event(UUID.randomUUID(), 105, 205, "ROUTINE", "2026-12-02"));
+        kafkaTemplate.send(TOPIC, "105", event(UUID.randomUUID(), 105, 205, "ROUTINE", "2026-12-03"));
+
+        awaitRecordsForPet(105, 3);
+
+        mvc.perform(get("/audit").param("petId", "105").param("limit", "2"))
+            .andExpect(jsonPath("$.length()").value(2));
+    }
+
+    @Test
     void aBadEventReachesTheDeadLetterTopicAndDoesNotBlockTheNextOne() throws Exception {
         try (Consumer<String, String> deadLetters = deadLetterConsumer()) {
             deadLetters.subscribe(List.of(DEAD_LETTER_TOPIC));

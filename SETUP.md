@@ -17,7 +17,8 @@ This covers Phases 1 and 2; Phase 3 extends it.
 Give Docker at least **8 GB of memory**. The container limits add up to about 7 GB
 (nine Spring services and Zipkin at 512 MB, Kafka at 1 GB, Kafka UI at 512 MB, PostgreSQL, Grafana
 and Prometheus at 256 MB each). On Docker Desktop this is under Settings > Resources; with the WSL 2 backend
-it is set in `%UserProfile%\.wslconfig` instead.
+it is set in `%UserProfile%\.wslconfig` instead. Those are upper limits: the stack measured about
+3.7 GB on an 8 GB laptop just after starting, so close other heavy programs before a demo.
 
 ## Start the stack
 
@@ -104,7 +105,8 @@ value on a slow machine, for example `WAIT=300 ./scripts/phase1-smoke-test.sh`.
 
 The Phase 2 smoke test runs those 18 checks and then the event pipeline: the alert service, the
 audit and WebSocket routes, booking and cancelling a test visit, one audit row for each, and the
-classification. It adds one test visit each time.
+classification. It adds one test visit each time, and those audit records stay in the `alerts-db`
+volume. To start a demo with an empty audit table, run `docker compose down -v` and start again.
 
 ```bash
 ./scripts/phase2-smoke-test.sh
@@ -136,7 +138,11 @@ The UI has a [checklist](docs/testing/ui-regression.md) to run by hand.
 curl "http://localhost:8080/api/alert/audit?petId=1"
 ```
 
-Filters, all optional: `petId`, `ownerId`, `type`, `from`, `to`.
+Filters, all optional: `petId`, `ownerId`, `type`, `from`, `to`. It returns the newest 100 records;
+`limit` changes that, up to 500.
+
+This setup is for local development only: the project has no login, `/ws` accepts any origin, and
+PostgreSQL is published on the host with a default password.
 
 The urgent visit types are configuration: set `URGENT_VISIT_TYPES=EMERGENCY,URGENT_CARE,SURGERY`
 in `.env` and run `docker compose up -d`. Live alerts go to the STOMP topic

@@ -43,6 +43,33 @@ jobs:
     - name: Validate examples against the schema
       run: python contracts/validate-events.py --expect 16
 
+  stack-smoke-test:
+    name: Smoke and regression tests on the running stack
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    steps:
+    - uses: actions/checkout@v4
+    - uses: actions/setup-java@v4
+      with:
+        java-version: '17'
+        distribution: 'adopt'
+        cache: maven
+    - name: Build the images
+      run: ./mvnw -B clean install -P buildDocker -DskipTests
+    - name: Start the stack
+      run: docker compose up -d
+    - name: Phase 2 smoke test
+      env:
+        WAIT: '300'
+      run: ./scripts/phase2-smoke-test.sh
+    - name: Backend regression test
+      run: ./scripts/regression-backend.sh
+    - name: Show what happened
+      if: failure()
+      run: |
+        docker compose ps -a
+        docker compose logs --tail 60 visits-service notification-alert-service api-gateway
+
   shellcheck:
     name: ShellCheck
     runs-on: ubuntu-latest
