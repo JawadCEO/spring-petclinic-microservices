@@ -12,11 +12,7 @@ spring:
               args:
                 name: defaultCircuitBreaker
                 fallbackUri: forward:/fallback
-            - name: Retry
-              args:
-                retries: 1
-                statuses: SERVICE_UNAVAILABLE
-                methods: POST
+          # The POST retry is set per route: on visits-service it could store a booking twice
           routes:
             - id: vets-service
               uri: lb://vets-service
@@ -24,6 +20,11 @@ spring:
                 - Path=/api/vet/**
               filters:
                 - StripPrefix=2
+                - name: Retry
+                  args:
+                    retries: 1
+                    statuses: SERVICE_UNAVAILABLE
+                    methods: POST
             - id: visits-service
               uri: lb://visits-service
               predicates:
@@ -36,6 +37,21 @@ spring:
                 - Path=/api/customer/**
               filters:
                 - StripPrefix=2
+                - name: Retry
+                  args:
+                    retries: 1
+                    statuses: SERVICE_UNAVAILABLE
+                    methods: POST
+            - id: notification-alert-service
+              uri: lb://notification-alert-service
+              predicates:
+                - Path=/api/alert/**
+              filters:
+                - StripPrefix=2
+            - id: notification-alert-websocket
+              uri: lb:ws://notification-alert-service
+              predicates:
+                - Path=/ws/**
             - id: genai-service
               uri: lb://genai-service
               predicates:
@@ -43,6 +59,11 @@ spring:
               filters:
                 - StripPrefix=2
                 - CircuitBreaker=name=genaiCircuitBreaker,fallbackUri=/fallback
+                - name: Retry
+                  args:
+                    retries: 1
+                    statuses: SERVICE_UNAVAILABLE
+                    methods: POST
   reactor:
     context-propagation: auto
 ---

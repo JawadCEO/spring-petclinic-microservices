@@ -15,11 +15,15 @@
  */
 package org.springframework.samples.petclinic.visits.model;
 
+import java.time.LocalDate;
+
 import com.fasterxml.jackson.annotation.JsonFormat;
+import com.fasterxml.jackson.annotation.JsonProperty;
 import jakarta.persistence.*;
+import jakarta.validation.constraints.NotNull;
+import jakarta.validation.constraints.Pattern;
 import jakarta.validation.constraints.Size;
 
-import java.util.Date;
 
 /**
  * Simple JavaBean domain object representing a visit.
@@ -32,14 +36,16 @@ import java.util.Date;
 @Table(name = "visits")
 public class Visit {
 
+    public static final String DEFAULT_VISIT_TYPE = "ROUTINE";
+
     @Id
     @GeneratedValue(strategy = GenerationType.IDENTITY)
     private Integer id;
 
     @Column(name = "visit_date")
-    @Temporal(TemporalType.TIMESTAMP)
     @JsonFormat(pattern = "yyyy-MM-dd")
-    private Date date = new Date();
+    @NotNull
+    private LocalDate date;
 
     @Size(max = 8192)
     @Column(name = "description")
@@ -48,16 +54,40 @@ public class Visit {
     @Column(name = "pet_id")
     private int petId;
 
+    /**
+     * Free-form on purpose: which types count as urgent is configuration of the alert service.
+     */
+    @Size(max = 40)
+    @Pattern(regexp = "[A-Z][A-Z0-9_]*", message = "must be upper case, for example ROUTINE")
+    @Column(name = "visit_type", nullable = false)
+    private String visitType = DEFAULT_VISIT_TYPE;
+
+    /**
+     * Changed only by cancelling, so a client cannot set it when booking.
+     */
+    @Enumerated(EnumType.STRING)
+    @Column(name = "status", nullable = false)
+    @JsonProperty(access = JsonProperty.Access.READ_ONLY)
+    private VisitStatus status = VisitStatus.SCHEDULED;
+
     public Integer getId() {
         return this.id;
     }
 
-    public Date getDate() {
+    public LocalDate getDate() {
         return this.date;
     }
 
     public String getDescription() {
         return this.description;
+    }
+
+    public String getVisitType() {
+        return this.visitType;
+    }
+
+    public VisitStatus getStatus() {
+        return this.status;
     }
 
     public int getPetId() {
@@ -68,12 +98,20 @@ public class Visit {
         this.id = id;
     }
 
-    public void setDate(Date date) {
+    public void setDate(LocalDate date) {
         this.date = date;
     }
 
     public void setDescription(String description) {
         this.description = description;
+    }
+
+    public void setVisitType(String visitType) {
+        this.visitType = visitType == null ? DEFAULT_VISIT_TYPE : visitType;
+    }
+
+    public void cancel() {
+        this.status = VisitStatus.CANCELLED;
     }
 
     public void setPetId(int petId) {
@@ -83,9 +121,10 @@ public class Visit {
 
     public static final class VisitBuilder {
         private Integer id;
-        private Date date;
+        private LocalDate date;
         private @Size(max = 8192) String description;
         private int petId;
+        private String visitType;
 
         private VisitBuilder() {
         }
@@ -99,7 +138,7 @@ public class Visit {
             return this;
         }
 
-        public VisitBuilder date(Date date) {
+        public VisitBuilder date(LocalDate date) {
             this.date = date;
             return this;
         }
@@ -114,12 +153,18 @@ public class Visit {
             return this;
         }
 
+        public VisitBuilder visitType(String visitType) {
+            this.visitType = visitType;
+            return this;
+        }
+
         public Visit build() {
             Visit visit = new Visit();
             visit.setId(id);
             visit.setDate(date);
             visit.setDescription(description);
             visit.setPetId(petId);
+            visit.setVisitType(visitType);
             return visit;
         }
     }

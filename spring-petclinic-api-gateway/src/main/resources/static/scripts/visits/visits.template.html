@@ -4,7 +4,12 @@
 
     <div class="form-group">
         <label>Date</label>
-        <input type="date" class="form-control" ng-model='$ctrl.date'/>
+        <input type="date" class="form-control" ng-model='$ctrl.date' required/>
+    </div>
+
+    <div class="form-group">
+        <label>Visit type</label>
+        <select class="form-control" ng-model="$ctrl.visitType" ng-options="type for type in $ctrl.visitTypes"></select>
     </div>
 
     <div class="form-group">
@@ -22,6 +27,8 @@
 <table class="table">
     <tr ng-repeat="v in $ctrl.visits">
         <td class="col-sm-2">{{v.date}}</td>
+        <td class="col-sm-2">{{v.visitType}}</td>
+        <td class="col-sm-2">{{v.status}}</td>
         <td style="white-space: pre-line">{{v.description}}</td>
     </tr>
 </table>

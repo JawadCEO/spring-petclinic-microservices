@@ -1,0 +1,167 @@
+# Phase 2 progress: event pipeline and live push
+
+Goal: booking a visit produces a classified, audited alert that appears live in every open
+browser. This file records what each work item changed and how it was tested.
+
+## Status
+
+The code for every item is written and tested on the laptop below. **Nothing is merged yet**:
+each item is one branch stacked on the previous one, waiting for review.
+
+| Order | Item | Story | Points | Plan lead | Branch |
+|---|---|---|---|---|---|
+| 1 | W4 | US1: publish a VisitEvent when a visit is booked | 5 | Jawad | `feature/w4-publish-visit-event` |
+| 2 | W6 | US2: visit type and classification | 5 | Jawad | `feature/w6-visit-type` (classifier in W7) |
+| 3 | W5 | US1: cancel a visit | 3 | Jawad | `feature/w5-cancel-visit` |
+| 4 | W7 | US3: alert service with a permanent audit record | 8 | Jawad | `feature/w7-alert-service` |
+| 5 | W8 | US4: push alerts over WebSocket | 5 | Jawad | `feature/w8-websocket-push` |
+| 6 | W9 | Enabler: run our own images in Docker | 2 | Sneha | `feature/w9-own-images` |
+| 7 | W15 | Enabler: regression tests for the UI and the backend | 3 | Sneha | `feature/w15-regression-tests` |
+
+W9 was suggested first, but it was built after the services so that it could be proven end to end.
+
+## Gate 2 check
+
+Gate 2: a booking made in the UI creates exactly one audit row and a live WebSocket message; all
+pull requests reviewed and merged; tests green in CI; demo and report done.
+
+| Condition | State |
+|---|---|
+| Booking in the UI gives one audit row and one live message | **Seen working** on 2026-11-01, see below |
+| Pull requests reviewed and merged | Not yet |
+| Tests green in CI | Not yet: CI runs when the pull requests are opened |
+| Demo and report | Not yet |
+
+What was done in a real browser against the stack, through the gateway:
+
+1. Subscribed to `/topic/notifications` over `ws://localhost:8080/ws` with raw STOMP frames.
+2. Booked a visit with type EMERGENCY in the visit form.
+3. One STOMP message arrived, severity EMERGENCY, and the audit search showed one new record.
+4. Clicked Cancel on the owner page: status CANCELLED, one `VISIT_CANCELLED` message and record.
+5. A second cancel returned 409.
+
+## How a booking flows
+
+1. `POST /owners/{ownerId}/pets/{petId}/visits` reaches `VisitResource`, which calls `VisitService`.
+2. `VisitService` saves the visit and raises a `VisitEvent` inside the transaction.
+3. After the commit, `VisitEventPublisher` sends it to `visit-events`, key = petId, on its own thread.
+   The request has already been answered with 201.
+4. `VisitEventListener` in notification-alert-service reads it in group `notification-group`.
+5. `AlertService` skips an event id it already has, classifies, and inserts one `audit_record` row.
+6. `AlertPushService` sends the alert to `/topic/notifications`.
+7. An event that still fails after 3 retries goes to `visit-events.DLT`.
+
+## What each item changed
+
+**W4.** The booking endpoint maps the owner id instead of dropping it; an owner id below 1 returns
+400. Adds `VisitService`, `VisitEvent`, `VisitEventPublisher`, and Kafka settings.
+
+**W6.** `visit_type` column, default ROUTINE, upper case, up to 40 characters; dropdown in the form;
+type on the visit and owner pages. `AlertClassifier` is in the alert service: EMERGENCY if the type
+is in `petclinic.alerts.urgent-types`, otherwise ROUTINE. Also: `visit_date` is mapped as
+`LocalDate`, because the timestamp mapping shifted the date by a day on a JVM not in UTC.
+
+**W5.** `status` column, default SCHEDULED, not settable by a client.
+`PUT owners/{ownerId}/pets/{petId}/visits/{visitId}/cancel` keeps the row and publishes
+`VISIT_CANCELLED`; 409 if already cancelled, 404 if the pet has no such visit. Cancel button on the
+owner page.
+
+**W7.** New module `spring-petclinic-notification-alert-service`, port 8085, registered in Eureka,
+at `/api/alert/**`. PostgreSQL table `audit_record` with a unique `event_id`; immutable entity; a
+repository with no delete. `GET /audit` filters by `petId`, `ownerId`, `type`, `from`, `to`.
+
+**W8.** STOMP endpoint `/ws`, topic `/topic/notifications`, gateway route `/ws/**`. Only a newly
+stored record is pushed, so a redelivered event pushes nothing.
+
+**W9.** Compose runs `petclinic/*` images built from this repository, so the stack is now Spring
+Boot 4.0.1 rather than the published 3.4.1 (spike finding 6). Adds the alert service and PostgreSQL
+with the volume `alerts-db`. `scripts/phase2-smoke-test.sh`.
+
+**W15.** `scripts/regression-backend.sh` and [the UI checklist](../testing/ui-regression.md).
+
+## Design decisions
+
+- **After the commit, on its own thread.** No event for a rolled-back visit, and a slow or
+  unreachable Kafka can neither fail nor delay a booking.
+- **One sending thread.** Events leave in commit order. If Kafka is down, up to 1,000 wait; beyond
+  that they are dropped and logged.
+- **The owner id of a cancel event comes from the URL**, as for booking. It is not stored in
+  `visits`, and not checked against the customers service, so a wrong owner id in the URL
+  would be recorded as sent. This answers the spike's open question for now.
+- **Two retry policies.** A bad event gets 3 retries, 1 second apart, then goes to the DLT. A
+  database failure retries for about five minutes, holding the partition, so a short outage moves
+  nothing to the DLT. Checked by stopping PostgreSQL on the real stack: the booking returned 201,
+  the DLT did not grow, and the record was stored once after PostgreSQL came back.
+- **No POST retry on the visits route.** The retry filter moved from the gateway's default filters
+  to the routes that had it and can use it, so a booking cannot be stored twice by the gateway.
+- **A date is required.** A missing or null date returns 400, so every new visit produces an event.
+- **Audit search returns at most 100 records by default**, or `limit`, up to 500, newest first.
+- **`VISIT_CANCELLED` keeps the severity of the visit.** The severity says how urgent the visit
+  was. W10 should use `eventType` so that a cancellation is not shown as an emergency.
+- **Audit table created by the service itself.** The shared config server overrides
+  `spring.sql.init.*` and `server.port` for every service. The first run on the real stack showed
+  this: the table did not exist. The test profile now sends the same shared settings.
+
+## Test results
+
+All on Jawad's laptop (Windows 11, JDK 17, Docker Desktop), 2026-11-01.
+
+| Test | Result |
+|---|---|
+| visits-service unit and integration tests | 24/24 |
+| notification-alert-service tests, with real Kafka and PostgreSQL containers | 26/26 |
+| api-gateway tests | 6/6 |
+| `scripts/phase2-smoke-test.sh` | Phase 1 18/18 and Phase 2 9/9 |
+| `scripts/regression-backend.sh` | 15/15 |
+| UI checklist | 13/13 steps |
+
+## Review of pull request #4
+
+Sneha's review on 2026-11-01: 18/18, 9/9 and 15/15 on her laptop, and the UI worked.
+
+| # | Comment | Resolution |
+|---|---|---|
+| 1 | Booking with no date gives no alert | Fixed: 400, and the date is required in the form |
+| 2 | Cancel gives no feedback on failure | Fixed. The shared error handler also crashed on any error without a field list, which hid the status from every caller; fixed too |
+| 3 | Database outage moves good events to the DLT | Fixed: about five minutes of retries for database failures |
+| 4 | Wrong owner id recorded as fact | Accepted limit, see below |
+| 5 | Gateway retry on booking | Fixed: no POST retry on the visits route |
+| 6 | Cancelled emergency shows as EMERGENCY | Decision above; for the team to confirm in W10 |
+| 7 | Audit search has no limit | Fixed: `limit`, default 100, maximum 500 |
+| 8 | Queued events lost on restart | Documented below |
+| 9 | Open WebSocket origin, published database port | Documented in SETUP.md |
+| 10 | Visit types fixed in the form | Documented below |
+| 11 | CI does not build the images | Fixed: new CI job builds the images, starts the stack and runs the smoke and regression tests |
+| 12 | Memory | Documented in SETUP.md with the measured use |
+| 13 | `Thread.sleep` in the push test | Fixed: sends probe events until the subscription is live |
+| 14 | `VisitEvent` duplicated | Fixed: the consumer now reads the shared contract examples in a test |
+| 15 | `json-schema-validator` version | Fixed: managed in the parent `pom.xml` |
+| 16 | Test data stays in `alerts-db` | Documented in SETUP.md |
+
+## Known limits
+
+- **A failed send loses the event.** There is no retry or outbox on the producer side.
+- **Nothing replays the dead-letter topic.** Events there stay until someone handles them.
+- **The owner id is not checked.** It comes from the URL for booking and cancelling, so a wrong id
+  reaches the audit record. Checking it would make every booking depend on customers-service being
+  up, which goes against the goal that a booking never waits on another service. Accepted for now;
+  the UI always sends the right id.
+- **Queued events are lost on restart.** Up to 1,000 events wait in memory while Kafka is down, and
+  a restart of visits-service loses them.
+- **Visit ids repeat after a restart.** visits-service uses in-memory HSQLDB, which resets, while
+  audit records stay in PostgreSQL. Records from before and after a restart can share a `visitId`
+  for different visits, and older ones point at visits that no longer exist. Use
+  `docker compose down -v` to start clean before a demo.
+- **The form's visit types are fixed.** The dropdown lists three types, so a new urgent type needs
+  a small code change as well as the configuration. To revisit with the UI work in Phase 3.
+- **The MySQL schema** only gets the new columns on a new database (`CREATE TABLE IF NOT EXISTS`).
+  An existing MySQL database needs them added by hand. MySQL was not run.
+- **No login**, so `/ws` and the audit search are open. Login is out of scope in the plan.
+- **The bell and toast are Phase 3** (W10), so staff do not see live alerts in the UI yet.
+- **Rahul's and Sneha's laptops** have not run any of this.
+
+## Open questions
+
+| Question | Needed by | Owner |
+|---|---|---|
+| What should happen to events in the dead-letter topic? | W14 | Team |

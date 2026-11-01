@@ -1,0 +1,52 @@
+# The shared config server sets server.port to 0 and wins over this file, so docker-compose
+# sets SERVER_PORT=8085. Run outside Docker with the config server up, the port is random.
+server:
+  port: 8085
+
+spring:
+  application:
+    name: notification-alert-service
+  config:
+    import: optional:configserver:${CONFIG_SERVER_URL:http://localhost:8888/}
+  datasource:
+    url: ${ALERTS_DB_URL:jdbc:postgresql://localhost:5432/petclinic_alerts}
+    username: ${ALERTS_DB_USER:petclinic}
+    password: ${ALERTS_DB_PASSWORD:petclinic}
+  jpa:
+    open-in-view: false
+    hibernate:
+      ddl-auto: none
+  kafka:
+    # localhost:29092 is the listener docker-compose publishes for programs running on the host
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:localhost:29092}
+    consumer:
+      group-id: notification-group
+      auto-offset-reset: earliest
+
+petclinic:
+  events:
+    visit-topic: visit-events
+    dead-letter-topic: visit-events.DLT
+    retries: 3
+    retry-interval: 1s
+    # About five minutes, on top of the connection timeout of each attempt
+    database-retries: 60
+    database-retry-interval: 5s
+  alerts:
+    # Override without a code change, for example PETCLINIC_ALERTS_URGENT_TYPES=EMERGENCY,URGENT_CARE,SURGERY
+    urgent-types: EMERGENCY,URGENT_CARE
+
+---
+spring:
+  config:
+    activate:
+      on-profile: docker
+    import: configserver:http://config-server:8888
+  datasource:
+    url: ${ALERTS_DB_URL:jdbc:postgresql://postgres:5432/petclinic_alerts}
+  kafka:
+    bootstrap-servers: ${KAFKA_BOOTSTRAP_SERVERS:kafka:9092}
+eureka:
+  client:
+    serviceUrl:
+      defaultZone: http://discovery-server:8761/eureka/

@@ -22,5 +22,7 @@ public record VisitDetails (
     Integer id,
     Integer petId,
     String date,
-    String description) {
+    String description,
+    String visitType,
+    String status) {
 }
